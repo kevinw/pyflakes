@@ -21,8 +21,10 @@ def check(source, filename='<unknown>'):
     ast = compile(source, filename, 'exec', _ast.PyCF_ONLY_AST)
     return Checker(ast, filename)
 
+allowed_names = set(['__file__'])
+
 def allow_undefined_name(name):
-    if hasattr(__builtin__, name):
+    if name in allowed_names or hasattr(__builtin__, name):
         return True
 
 def iter_fields(node):
@@ -151,7 +153,7 @@ class Checker(object):
             for imp in scope.itervalues():
                 if isinstance(imp, Importation) and not imp.used:
                     node = imp.source
-                    self.report(messages.UnusedImport, node.lineno, node.col_offset, node.module)
+                    self.report(messages.UnusedImport, node.lineno, node.col_offset, imp.name)
 
     def push_function_scope(self):
         self.scope_stack.append(FunctionScope())
@@ -198,17 +200,26 @@ class Checker(object):
     CONST = PASS = CONTINUE = BREAK = ELLIPSIS = ignore
 
     # new
-    ASSIGN = handle_children
-    EXPR = handle_children
-    NUM = ignore
-    UNARYOP = handle_children
-    UADD = handle_children
-    STR = ignore
+    ASSIGN = \
+    EXPR = \
+    REPR = \
+    BINOP = \
+    BOOLOP = \
+    UNARYOP = \
+    INDEX = \
+    UADD = \
+    EXCEPTHANDLER = \
+    handle_children
+
+    NUM = \
+    STR = \
+    ignore
 
     # wrong
     COMPREHENSION = handle_children
     ATTRIBUTE = ignore
     LOAD = ignore # always in "ctx"
+    STORE = ignore
 
 
 
@@ -355,9 +366,18 @@ class Checker(object):
     def ASSIGN(self, node):
         self.handle_node(node.value)
 
-        for target in node.targets:
+        def assign_nodes(targets):
+            for target in targets:
+                if isinstance(target, (_ast.Tuple, _ast.List)):
+                    yield assign_nodes(target)
+                else:
+                    yield target
+
+        for target in assign_nodes(node.targets):
+            name = target.attr if isinstance(target, _ast.Attribute) else target.id
+
             # TODO: missing UndefinedLocal message here
-            self.add_binding(node.lineno, node.col_offset, Assignment(target.id, node))
+            self.add_binding(target.lineno, target.col_offset, Assignment(name, target))
 
         for target in node.targets:
             self.handle_node(target)
