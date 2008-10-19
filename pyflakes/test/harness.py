@@ -9,7 +9,7 @@ from pyflakes import checker
 class Test(unittest.TestCase):
 
     def flakes(self, input, *expectedOutputs):
-        w = checker.Checker(compiler.parse(textwrap.dedent(input)))
+        w = checker.check(textwrap.dedent(input))
         outputs = [type(o) for o in w.messages]
         expectedOutputs = list(expectedOutputs)
         outputs.sort()

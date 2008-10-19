@@ -20,8 +20,8 @@ class UnusedImport(Message):
 
 class RedefinedWhileUnused(Message):
     message = 'redefinition of unused %r from line %r'
-    def __init__(self, filename, lineno, name, orig_lineno):
-        Message.__init__(self, filename, lineno)
+    def __init__(self, filename, lineno, col, name, orig_lineno):
+        Message.__init__(self, filename, lineno, col)
         self.message_args = (name, orig_lineno)
 
 class ImportShadowedByLoopVar(Message):

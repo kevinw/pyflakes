@@ -148,9 +148,10 @@ class Checker(object):
 
     def check_dead_scopes(self):
         for scope in self.dead_scopes:
-            for node in scope.itervalues():
-                if isinstance(node, Importation) and not node.used:
-                    self.report(messages.UnusedImport, node.source)
+            for imp in scope.itervalues():
+                if isinstance(imp, Importation) and not imp.used:
+                    node = imp.source
+                    self.report(messages.UnusedImport, node.lineno, node.col_offset, node.module)
 
     def push_function_scope(self):
         self.scope_stack.append(FunctionScope())
@@ -196,8 +197,20 @@ class Checker(object):
 
     CONST = PASS = CONTINUE = BREAK = ELLIPSIS = ignore
 
+    # new
     ASSIGN = handle_children
+    EXPR = handle_children
     NUM = ignore
+    UNARYOP = handle_children
+    UADD = handle_children
+    STR = ignore
+
+    # wrong
+    COMPREHENSION = handle_children
+    ATTRIBUTE = ignore
+    LOAD = ignore # always in "ctx"
+
+
 
     def add_binding(self, lineno, col, value, report_redef=True):
         if (isinstance(self.scope.get(value.name), FunctionDefinition) and
@@ -208,10 +221,10 @@ class Checker(object):
         if not isinstance(self.scope, ClassScope):
             for scope in reversed(self.scope_stack):
                 if (isinstance(scope.get(value.name), Importation)
-                    and not scope[value.name].unused
+                    and not scope[value.name].used
                     and report_redef):
                     self.report(messages.RedefinedWhileUnused,
-                                lineno, col, value.name, scope[value.name].sourcece.lineno)
+                                lineno, col, value.name, scope[value.name].source.lineno)
 
         if isinstance(value, UnBinding):
             try:
@@ -231,14 +244,15 @@ class Checker(object):
         self.handle_node(node.context_expr)
 
         if isinstance(node.optional_vars, _ast.Tuple):
-            with_vars = node.optional_vars
+            with_vars = node.optional_vars.elts
         else:
             with_vars = [node.optional_vars]
 
         for var in with_vars:
-            self.add_binding(var.lineno, var.col_offset, Assignment(var.id, var))
+            if var is not None:
+                self.add_binding(var.lineno, var.col_offset, Assignment(var.id, var))
 
-        self.handle_children(node.body)
+        self.handle_nodes(node.body)
 
     def GLOBAL(self, node):
         """
@@ -251,7 +265,7 @@ class Checker(object):
         self.handle_nodes(node.generators)
         self.handle_node(node.elt)
 
-    GENEXPRINNER = LISTCOMP
+    GENERATOREXP = LISTCOMP
 
     def FOR(self, node):
         """
@@ -308,8 +322,8 @@ class Checker(object):
             else:
                 self.add_binding(target.lineno, target.col_offset, UnBinding(target.id, target))
 
-    def FUNCTION(self, node):
-        self.handle_children(node.decorators)
+    def FUNCTIONDEF(self, node):
+        self.handle_nodes(node.decorators)
         self.add_binding(node.lineno, node.col_offset, FunctionDefinition(node.name, node))
         self.LAMBDA(node)
 
@@ -330,13 +344,12 @@ class Checker(object):
                             self.report(messages.DuplicateArgument, arg.lineno, arg.col_offset, arg.id)
                         args.append(arg.id)
 
-    def CLASS(self, node):
+    def CLASSDEF(self, node):
         self.add_binding(node.lineno, node.col_offset, Assignment(node.name, node))
-        for base in node.bases:
-            self.handle_node(base)
+        self.handle_nodes(node.bases)
 
         self.push_class_scope()
-        self.handle_children(node.body)
+        self.handle_nodes(node.body)
         self.pop_scope()
 
     def ASSIGN(self, node):
