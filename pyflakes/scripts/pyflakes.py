@@ -3,14 +3,15 @@
 Implementation of the command-line I{pyflakes} tool.
 """
 
-import compiler, sys
+import _ast
+import sys
 import os
 
 checker = __import__('pyflakes.checker').checker
 
 def check(codeString, filename):
     try:
-        tree = compiler.parse(codeString)
+        tree = compile(codeString, filename, 'exec', _ast.PyCF_ONLY_AST)
     except (SyntaxError, IndentationError):
         value = sys.exc_info()[1]
         try:

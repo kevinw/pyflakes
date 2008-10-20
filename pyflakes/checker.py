@@ -27,6 +27,8 @@ def allow_undefined_name(name):
     if name in allowed_names or hasattr(__builtin__, name):
         return True
 
+    return False
+
 def iter_fields(node):
     """Iterate over all fields of a node, only yielding existing fields."""
     for field in node._fields or []:
@@ -169,8 +171,11 @@ class Checker(object):
             self.handle_node(node)
 
     def handle_nodes(self, nodes):
-        for node in nodes:
-            self.handle_node(node)
+        if isinstance(nodes, list):
+            for node in nodes:
+                self.handle_node(node)
+        else:
+            self.handle_node(nodes)
     
     def handle_node(self, node):
         self.node_depth += 1
@@ -192,7 +197,7 @@ class Checker(object):
     ASSLIST = GETATTR = SLICE = SLICEOBJ = IF = CALL = DISCARD = \
     RETURN = ADD = MOD = SUB = NOT = UNARYSUB = INVERT = ASSERT = COMPARE = \
     SUBSCRIPT = AND = OR = TRYEXCEPT = RAISE = YIELD = DICT = LEFTSHIFT = \
-    RIGHTSHIFT = KEYWORD = TRYFINALLY = WHILE = EXEC = MUL = DIV = POWER = \
+    RIGHTSHIFT = KEYWORD = TRYFINALLY = WHILE = EXEC = DIV = POWER = \
     FLOORDIV = BITAND = BITOR = BITXOR = LISTCOMPFOR = LISTCOMPIF = \
     AUGASSIGN = BACKQUOTE = UNARYADD = GENEXPR = GENEXPRFOR = GENEXPRIF = \
     IFEXP = handle_children
@@ -201,13 +206,19 @@ class Checker(object):
 
     # new
     ASSIGN = \
+    EQ = \
     EXPR = \
     REPR = \
     BINOP = \
     BOOLOP = \
-    UNARYOP = \
+    LSHIFT = \
+    MULT = \
+    POW = \
     INDEX = \
+    RSHIFT = \
     UADD = \
+    UNARYOP = \
+    USUB = \
     EXCEPTHANDLER = \
     handle_children
 
@@ -221,8 +232,6 @@ class Checker(object):
     LOAD = ignore # always in "ctx"
     STORE = ignore
 
-
-
     def add_binding(self, lineno, col, value, report_redef=True):
         if (isinstance(self.scope.get(value.name), FunctionDefinition) and
             isinstance(value, FunctionDefinition)):
@@ -230,7 +239,7 @@ class Checker(object):
                 value.name, self.scope[value.name].source.lineno)
 
         if not isinstance(self.scope, ClassScope):
-            for scope in reversed(self.scope_stack):
+            for scope in self.scope_stack[::-1]:
                 if (isinstance(scope.get(value.name), Importation)
                     and not scope[value.name].used
                     and report_redef):
@@ -272,11 +281,16 @@ class Checker(object):
         if isinstance(self.scope, FunctionScope):
             self.scope.globals.update(dict.fromkeys(node.names))
 
-    def LISTCOMP(self, node):
-        self.handle_nodes(node.generators)
-        self.handle_node(node.elt)
+    # def LISTCOMP(self, node):
+    #     self.push_function_scope()
+    #     node.target
+    #     for gen in node.generators:
+    #         self.handle_nodes(gen.ifs)
+    #     self.pop_scope()
 
-    GENERATOREXP = LISTCOMP
+    # GENERATOREXP = LISTCOMP
+    LISTCOMP = ignore
+    GENERATOREXP = ignore
 
     def FOR(self, node):
         """
@@ -326,6 +340,9 @@ class Checker(object):
             if not import_starred and not allow_undefined_name(node.id):
                 self.report(messages.UndefinedName, node.lineno, node.col_offset, node.id)
 
+    def ATTRIBUTE(self, node):
+        self.handle_node(node.value)
+
     def DELETE(self, node):
         for target in node.targets:
             if isinstance(self.scope, FunctionScope) and target.id in self.scope.globals:
@@ -351,9 +368,16 @@ class Checker(object):
                     if isinstance(arg, _ast.Tuple):
                         add_args(arg.elts)
                     else:
-                        if arg.id in args:
+                        if arg.id in (a.id for a in args):
                             self.report(messages.DuplicateArgument, arg.lineno, arg.col_offset, arg.id)
-                        args.append(arg.id)
+                        args.append(arg)
+
+            self.push_function_scope()
+            add_args(node.args.args)
+            for arg in args:
+                self.add_binding(arg.lineno, arg.col_offset, Assignment(arg.id, arg), report_redef=False)
+            self.handle_nodes(node.body)
+            self.pop_scope()
 
     def CLASSDEF(self, node):
         self.add_binding(node.lineno, node.col_offset, Assignment(node.name, node))
@@ -369,18 +393,39 @@ class Checker(object):
         def assign_nodes(targets):
             for target in targets:
                 if isinstance(target, (_ast.Tuple, _ast.List)):
-                    yield assign_nodes(target)
+                    for subnode in assign_nodes(target.elts):
+                        yield subnode
                 else:
                     yield target
 
         for target in assign_nodes(node.targets):
             name = target.attr if isinstance(target, _ast.Attribute) else target.id
 
+            # if the name hasn't been already defined in the current scope
+            if isinstance(self.scope, FunctionScope) and name not in self.scope:
+                # for each function or module scope above us
+                for scope in self.scope_stack[:-1]:
+                    if not isinstance(scope, (FunctionScope, ModuleScope)):
+                        continue
+                    # if the name was defined in that scope, and the name has
+                    # been accessed already in the current scope, and hasn't
+                    # been declared global
+                    if (name in scope
+                           and scope[name].used
+                           and scope[name].used[0] is self.scope
+                           and name not in self.scope.globals):
+
+                        # then it's probably a mistake
+                        self.report(messages.UndefinedLocal,
+                                    scope[name].used[1],
+                                    name,
+                                    scope[name].source.lineno)
+                        break
+
             # TODO: missing UndefinedLocal message here
             self.add_binding(target.lineno, target.col_offset, Assignment(name, target))
 
-        for target in node.targets:
-            self.handle_node(target)
+        self.handle_nodes(node.targets)
 
     def IMPORT(self, node):
         for alias in node.names:

@@ -1,10 +1,6 @@
-
-import textwrap, compiler
-
+import textwrap
 from twisted.trial import unittest
-
 from pyflakes import checker
-
 
 class Test(unittest.TestCase):
 
