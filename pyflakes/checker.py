@@ -31,6 +31,9 @@ def allow_undefined_name(name):
 
 def iter_fields(node):
     """Iterate over all fields of a node, only yielding existing fields."""
+    if not hasattr(node, '_fields'):
+        raise TypeError('iter_fields given a %r: type is %s, module is %s' % (node, type(node), node.__class__.__module__))
+
     for field in node._fields or []:
         try:
             yield field, getattr(node, field)
