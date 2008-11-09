@@ -1,12 +1,17 @@
-# -*- test-case-name: pyflakes -*-
-# (c) 2005-2008 Divmod, Inc.
-# See LICENSE file for details
-
-import __builtin__
-from compiler import ast
-
+import ast
 from pyflakes import messages
+import __builtin__
 
+
+defined_names = set(('__file__',))
+
+def is_builtin(name):
+    if hasattr(__builtin__, name):
+        return True
+    if name in defined_names:
+        return True
+
+    return False
 
 class Binding(object):
     """
@@ -43,7 +48,7 @@ class FunctionDefinition(Binding):
 
 
 class Scope(dict):
-    importStarred = False       # set to True when import * is found
+    import_starred = False       # set to True when import * is found
 
     def __repr__(self):
         return '<%s at 0x%x %s>' % (self.__class__.__name__, id(self), dict.__repr__(self))
@@ -71,25 +76,23 @@ class FunctionScope(Scope):
 class ModuleScope(Scope):
     pass
 
-
-class Checker(object):
-    nodeDepth = 0
-    traceTree = False
-
+class Checker(ast.NodeVisitor):
     def __init__(self, tree, filename='(none)'):
+        ast.NodeVisitor.__init__(self)
+
         self.deferred = []
         self.dead_scopes = []
         self.messages = []
         self.filename = filename
-        self.scopeStack = [ModuleScope()]
-        self.futuresAllowed = True
+        self.scope_stack = [ModuleScope()]
+        self.futures_allowed = True
 
-        self.handleChildren(tree)
+        self.visit(tree)
         for handler, scope in self.deferred:
-            self.scopeStack = scope
+            self.scope_stack = scope
             handler()
-        del self.scopeStack[1:]
-        self.popScope()
+        del self.scope_stack[1:]
+        self.pop_scope()
         self.check_dead_scopes()
 
     def defer(self, callable):
@@ -100,290 +103,268 @@ class Checker(object):
         `callable` is called, the scope at the time this is called will be
         restored, however it will contain any new bindings added to it.
         '''
-        self.deferred.append( (callable, self.scopeStack[:]) )
-
-    def scope(self):
-        return self.scopeStack[-1]
-    scope = property(scope)
-
-    def popScope(self):
-        self.dead_scopes.append(self.scopeStack.pop())
+        self.deferred.append( (callable, self.scope_stack[:]) )
 
     def check_dead_scopes(self):
+        # Check for modules that were imported but unused
         for scope in self.dead_scopes:
             for importation in scope.itervalues():
                 if isinstance(importation, Importation) and not importation.used:
                     self.report(messages.UnusedImport, importation.source.lineno, importation.name)
 
-    def pushFunctionScope(self):
-        self.scopeStack.append(FunctionScope())
+    def push_function_scope(self):
+        self.scope_stack.append(FunctionScope())
 
-    def pushClassScope(self):
-        self.scopeStack.append(ClassScope())
+    def push_class_scope(self):
+        self.scope_stack.append(ClassScope())
 
-    def report(self, messageClass, *args, **kwargs):
-        self.messages.append(messageClass(self.filename, *args, **kwargs))
+    def pop_scope(self):
+        scope = self.scope_stack.pop()
+        self.dead_scopes.append(scope)
 
-    def handleChildren(self, tree):
-        for node in tree.getChildNodes():
-            self.handleNode(node)
+    @property
+    def scope(self):
+        return self.scope_stack[-1]
 
-    def handleNode(self, node):
-        if self.traceTree:
-            print '  ' * self.nodeDepth + node.__class__.__name__
-        self.nodeDepth += 1
-        nodeType = node.__class__.__name__.upper()
-        if nodeType not in ('STMT', 'FROM'):
-            self.futuresAllowed = False
-        try:
-            handler = getattr(self, nodeType)
-            handler(node)
-        finally:
-            self.nodeDepth -= 1
-        if self.traceTree:
-            print '  ' * self.nodeDepth + 'end ' + node.__class__.__name__
+    def report(self, message_class, *args, **kwargs):
+        self.messages.append(message_class(self.filename, *args, **kwargs))
 
-    def ignore(self, node):
-        pass
+    def visit_Import(self, node):
+        for name_node in node.names:
+            # "import bar as foo" -> name=bar, asname=foo
+            name = name_node.asname or name_node.name
+            self.add_binding(node, Importation(name, node))
 
-    STMT = PRINT = PRINTNL = TUPLE = LIST = ASSTUPLE = ASSATTR = \
-    ASSLIST = GETATTR = SLICE = SLICEOBJ = IF = CALLFUNC = DISCARD = \
-    RETURN = ADD = MOD = SUB = NOT = UNARYSUB = INVERT = ASSERT = COMPARE = \
-    SUBSCRIPT = AND = OR = TRYEXCEPT = RAISE = YIELD = DICT = LEFTSHIFT = \
-    RIGHTSHIFT = KEYWORD = TRYFINALLY = WHILE = EXEC = MUL = DIV = POWER = \
-    FLOORDIV = BITAND = BITOR = BITXOR = LISTCOMPFOR = LISTCOMPIF = \
-    AUGASSIGN = BACKQUOTE = UNARYADD = GENEXPR = GENEXPRFOR = GENEXPRIF = \
-    IFEXP = handleChildren
+    def visit_GeneratorExp(self, node):
+        for generator in node.generators:
+            self.visit(generator.iter)
 
-    CONST = PASS = CONTINUE = BREAK = ELLIPSIS = ignore
+            target = generator.target
+            assert isinstance(target, ast.Name)
+            self.add_binding(target, Assignment(target.id, generator.target))
 
-    def addBinding(self, lineno, value, reportRedef=True):
-        '''Called when a binding is altered.
+            if hasattr(node, 'elt'):
+                self.visit(node.elt)
 
-        - `lineno` is the line of the statement responsible for the change
-        - `value` is the optional new value, a Binding instance, associated
-          with the binding; if None, the binding is deleted if it exists.
-        - if `reportRedef` is True (default), rebinding while unused will be
-          reported.
+            self.visit_nodes(generator.ifs)
+
+    visit_ListComp = visit_GeneratorExp
+
+    def visit_For(self, node):
         '''
-        if (isinstance(self.scope.get(value.name), FunctionDefinition)
-                    and isinstance(value, FunctionDefinition)):
-            self.report(messages.RedefinedFunction,
-                        lineno, value.name, self.scope[value.name].source.lineno)
-
-        if not isinstance(self.scope, ClassScope):
-            for scope in self.scopeStack[::-1]:
-                if (isinstance(scope.get(value.name), Importation)
-                        and not scope[value.name].used
-                        and reportRedef):
-
-                    self.report(messages.RedefinedWhileUnused,
-                                lineno, value.name, scope[value.name].source.lineno)
-
-        if isinstance(value, UnBinding):
-            try:
-                del self.scope[value.name]
-            except KeyError:
-                self.report(messages.UndefinedName, lineno, value.name)
-        else:
-            self.scope[value.name] = value
-
-
-    def WITH(self, node):
-        """
-        Handle C{with} by adding bindings for the name or tuple of names it
-        puts into scope and by continuing to process the suite within the
-        statement.
-        """
-        # for "with foo as bar", there is no AssName node for "bar".
-        # Instead, there is a Name node. If the "as" expression assigns to
-        # a tuple, it will instead be a AssTuple node of Name nodes.
-        #
-        # Of course these are assignments, not references, so we have to
-        # handle them as a special case here.
-
-        self.handleNode(node.expr)
-
-        if isinstance(node.vars, ast.AssTuple):
-            varNodes = node.vars.nodes
-        elif node.vars is not None:
-            varNodes = [node.vars]
-        else:
-            varNodes = []
-
-        for varNode in varNodes:
-            self.addBinding(varNode.lineno, Assignment(varNode.name, varNode))
-
-        self.handleChildren(node.body)
-
-
-    def GLOBAL(self, node):
-        """
-        Keep track of globals declarations.
-        """
-        if isinstance(self.scope, FunctionScope):
-            self.scope.globals.update(dict.fromkeys(node.names))
-
-    def LISTCOMP(self, node):
-        for qual in node.quals:
-            self.handleNode(qual)
-        self.handleNode(node.expr)
-
-    GENEXPRINNER = LISTCOMP
-
-    def FOR(self, node):
-        """
         Process bindings for loop variables.
-        """
-        vars = []
-        def collectLoopVars(n):
-            if hasattr(n, 'name'):
-                vars.append(n.name)
-            else:
-                for c in n.getChildNodes():
-                    collectLoopVars(c)
-
-        collectLoopVars(node.assign)
-        for varn in vars:
-            if (isinstance(self.scope.get(varn), Importation)
-                    # unused ones will get an unused import warning
-                    and self.scope[varn].used):
+        '''
+        for var in self.flatten(node.target):
+            upval = self.scope.get(var.id)
+            if isinstance(upval, Importation) and upval.used:
                 self.report(messages.ImportShadowedByLoopVar,
-                            node.lineno, varn, self.scope[varn].source.lineno)
+                            node.lineno, node.col_offset, var.id, upval.source.lineno)
 
-        self.handleChildren(node)
+            self.add_binding(var, Assignment(var.id, var))
 
-    def NAME(self, node):
-        """
-        Locate the name in locals / function / globals scopes.
-        """
+        self.visit_nodes(node.body + node.orelse)
+
+    def visit_FunctionDef(self, node):
+        self.visit_nodes(node.decorators)
+        self.add_binding(node, FunctionDefinition(node.name, node))
+        self.visit_Lambda(node)
+
+    def visit_Lambda(self, node):
+        self.visit_nodes(node.args.defaults)
+
+        def run_function():
+            self.push_function_scope()
+
+            # Check for duplicate arguments
+            argnames = set()
+            for arg in self.flatten(node.args.args):
+                if arg.id in argnames:
+                    self.report(messages.DuplicateArgument, arg.lineno, arg.col_offset, arg.id)
+                argnames.add(arg.id)
+
+            self.assign_vars(node.args.args, report_redef=False)
+            self.visit_nodes(node.body)
+            self.pop_scope()
+
+        self.defer(run_function)
+
+    def visit_Name(self, node):
+        '''
+        Locate names in locals / function / globals scopes.
+        '''
+        scope, name = self.scope, node.id
+
         # try local scope
-        importStarred = self.scope.importStarred
+        import_starred = scope.import_starred
         try:
-            self.scope[node.name].used = (self.scope, node.lineno)
+            scope[name].used = (scope, node.lineno, node.col_offset)
         except KeyError:
             pass
         else:
             return
 
         # try enclosing function scopes
-
-        for scope in self.scopeStack[-2:0:-1]:
-            importStarred = importStarred or scope.importStarred
-            if not isinstance(scope, FunctionScope):
+        for func_scope in self.scope_stack[-2:0:-1]:
+            import_starred = import_starred or func_scope.import_starred
+            if not isinstance(func_scope, FunctionScope):
                 continue
             try:
-                scope[node.name].used = (self.scope, node.lineno)
+                func_scope[name].used = (scope, node.lineno, node.col_offset)
             except KeyError:
                 pass
             else:
                 return
 
         # try global scope
-
-        importStarred = importStarred or self.scopeStack[0].importStarred
+        import_starred = import_starred or self.scope_stack[0].import_starred
         try:
-            self.scopeStack[0][node.name].used = (self.scope, node.lineno)
+            self.scope_stack[0][node.id].used = (scope, node.lineno, node.col_offset)
         except KeyError:
-            if ((not hasattr(__builtin__, node.name))
-                    and node.name not in ['__file__']
-                    and not importStarred):
-                self.report(messages.UndefinedName, node.lineno, node.name)
+            if not import_starred and not is_builtin(name):
+                self.report(messages.UndefinedName, node.lineno, node.col_offset, name)
 
+    def assign_vars(self, targets, report_redef=True):
+        scope = self.scope
 
-    def FUNCTION(self, node):
-        if getattr(node, "decorators", None) is not None:
-            self.handleChildren(node.decorators)
-        self.addBinding(node.lineno, FunctionDefinition(node.name, node))
-        self.LAMBDA(node)
-
-    def LAMBDA(self, node):
-        for default in node.defaults:
-            self.handleNode(default)
-
-        def runFunction():
-            args = []
-
-            def addArgs(arglist):
-                for arg in arglist:
-                    if isinstance(arg, tuple):
-                        addArgs(arg)
-                    else:
-                        if arg in args:
-                            self.report(messages.DuplicateArgument, node.lineno, arg)
-                        args.append(arg)
-
-            self.pushFunctionScope()
-            addArgs(node.argnames)
-            for name in args:
-                self.addBinding(node.lineno, Assignment(name, node), reportRedef=False)
-            self.handleNode(node.code)
-            self.popScope()
-
-        self.defer(runFunction)
-
-    def CLASS(self, node):
-        self.addBinding(node.lineno, Assignment(node.name, node))
-        for baseNode in node.bases:
-            self.handleNode(baseNode)
-        self.pushClassScope()
-        self.handleChildren(node.code)
-        self.popScope()
-
-    def ASSNAME(self, node):
-        if node.flags == 'OP_DELETE':
-            if isinstance(self.scope, FunctionScope) and node.name in self.scope.globals:
-                del self.scope.globals[node.name]
-            else:
-                self.addBinding(node.lineno, UnBinding(node.name, node))
-        else:
+        for target in self.flatten(targets):
+            name = target.id
             # if the name hasn't already been defined in the current scope
-            if isinstance(self.scope, FunctionScope) and node.name not in self.scope:
+            if isinstance(scope, FunctionScope) and name not in scope:
                 # for each function or module scope above us
-                for scope in self.scopeStack[:-1]:
-                    if not isinstance(scope, (FunctionScope, ModuleScope)):
+                for upscope in self.scope_stack[:-1]:
+                    if not isinstance(upscope, (FunctionScope, ModuleScope)):
                         continue
+
+                    upval = upscope.get(name)
                     # if the name was defined in that scope, and the name has
                     # been accessed already in the current scope, and hasn't
                     # been declared global
-                    if (node.name in scope
-                            and scope[node.name].used
-                            and scope[node.name].used[0] is self.scope
-                            and node.name not in self.scope.globals):
-                        # then it's probably a mistake
-                        self.report(messages.UndefinedLocal,
-                                    scope[node.name].used[1],
-                                    node.name,
-                                    scope[node.name].source.lineno)
-                        break
+                    if upval is not None:
+                        if upval.used and upval.used[0] is scope and name not in scope.globals:
+                            # then it's probably a mistake
+                            self.report(messages.UndefinedLocal,
+                                        upval.used[1], upval.used[2], name, upval.source.lineno, upval.source.col_offset)
 
-            self.addBinding(node.lineno, Assignment(node.name, node))
+            self.add_binding(target, Assignment(name, target), report_redef)
 
-    def ASSIGN(self, node):
-        self.handleNode(node.expr)
-        for subnode in node.nodes[::-1]:
-            self.handleNode(subnode)
+    def visit_Assign(self, node):
+        for target in node.targets:
+            self.visit_nodes(node.value)
+            self.assign_vars(node.targets)
 
-    def IMPORT(self, node):
-        for name, alias in node.names:
-            name = alias or name
-            importation = Importation(name, node)
-            self.addBinding(node.lineno, importation)
+    def visit_Delete(self, node):
+        for target in node.targets:
+            assert isinstance(target, ast.Name)
+            if isinstance(self.scope, FunctionScope) and target.id in self.scope.globals:
+                del self.scope.globals[target.id]
+            else:
+                self.add_binding(target, UnBinding(target.id, target))
 
-    def FROM(self, node):
-        if node.modname == '__future__':
-            if not self.futuresAllowed:
-                self.report(messages.LateFutureImport, node.lineno, [n[0] for n in node.names])
+    def visit_With(self, node):
+        self.visit(node.context_expr)
+    
+        # handle new bindings made by optional "as" part
+        if node.optional_vars is not None:
+            self.assign_vars(node.optional_vars)
+
+        self.visit_nodes(node.body)
+
+    def visit_ImportFrom(self, node):
+        if node.module == '__future__':
+            if not self.futures_allowed:
+                self.report(messages.LateFutureImport, node.lineno, node.col_offset, [alias.name for alias in node.names])
         else:
-            self.futuresAllowed = False
-
-        for name, alias in node.names:
-            if name == '*':
-                self.scope.importStarred = True
-                self.report(messages.ImportStarUsed, node.lineno, node.modname)
+            self.futures_allowed = False
+        
+        for alias in node.names:
+            if alias.name == '*':
+                self.scope.import_starred = True
+                self.report(messages.ImportStarUsed, node.lineno, node.col_offset, node.module)
                 continue
-            name = alias or name
+            name = alias.asname or alias.name
             importation = Importation(name, node)
-            if node.modname == '__future__':
-                importation.used = (self.scope, node.lineno)
-            self.addBinding(node.lineno, importation)
+            if node.module == '__future__':
+                importation.used = (self.scope, node.lineno, node.col_offset)
+            self.add_binding(node, importation)
+
+    def visit_Global(self, node):
+        '''
+        Keep track of global declarations.
+        '''
+        scope = self.scope
+        if isinstance(scope, FunctionScope):
+            scope.globals.update(dict.fromkeys(node.names))
+
+    def visit_ClassDef(self, node):
+        self.add_binding(node, Assignment(node.name, node))
+        self.visit_nodes(node.bases)
+        
+        self.push_class_scope()
+        self.visit_nodes(node.body)
+        self.pop_scope()
+
+    def visit_excepthandler(self, node):
+        if node.name is not None:
+            self.visit(node.type)
+        if node.name is not None:
+            self.assign_vars(node.name)
+        self.visit_nodes(node.body)
+        
+
+    def flatten(self, nodes):
+        if isinstance(nodes, ast.Attribute):
+            self.visit(nodes)
+            return []
+        elif isinstance(nodes, ast.Name):
+            return [nodes]
+        elif isinstance(nodes, (ast.Tuple, ast.List)):
+            return self.flatten(nodes.elts)
+
+        flattened_nodes = []
+        for node in nodes:
+            if hasattr(node, 'elts'):
+                flattened_nodes += self.flatten(node.elts)
+            elif node is not None:
+                flattened_nodes += self.flatten(node)
+        
+        return flattened_nodes
+
+    def add_binding(self, node, value, report_redef=True):
+        line, col, scope, name = node.lineno, node.col_offset, self.scope, value.name
+
+        # Check for a redefined function
+        func = scope.get(name)
+        if (isinstance(func, FunctionDefinition) and isinstance(value, FunctionDefinition)):
+            self.report(messages.RedefinedFunction, line, name, func.source.lineno)
+
+        # Check for redefining an unused import
+        if report_redef and not isinstance(scope, ClassScope):
+            for up_scope in self.scope_stack[::-1]:
+                upval = up_scope.get(name)
+                if isinstance(upval, Importation) and not upval.used:
+                    self.report(messages.RedefinedWhileUnused, line, col, name, upval.source.lineno)
+
+        # Check for "del undefined_name"
+        if isinstance(value, UnBinding):
+            try:
+                del scope[name]
+            except KeyError:
+                self.report(messages.UndefinedName, line, col, name)
+        else:
+            scope[name] = value
+
+    def visit(self, node):
+        if not isinstance(node, (ast.Module, ast.ImportFrom)):
+            self.futures_allowed = False
+
+        return super(Checker, self).visit(node)
+
+    def visit_nodes(self, nodes):
+        try:
+            nodes = list(getattr(nodes, 'elts', nodes))
+        except TypeError:
+            nodes = [nodes]
+
+        for node in nodes:
+            self.visit(node)
+

@@ -30,8 +30,8 @@ class RedefinedWhileUnused(Message):
 
 class ImportShadowedByLoopVar(Message):
     message = 'import %r from line %r shadowed by loop variable'
-    def __init__(self, filename, lineno, name, orig_lineno):
-        Message.__init__(self, filename, lineno)
+    def __init__(self, filename, lineno, col, name, orig_lineno):
+        Message.__init__(self, filename, lineno, col)
         self.message_args = (name, orig_lineno)
 
 
@@ -51,7 +51,7 @@ class UndefinedName(Message):
 
 class UndefinedLocal(Message):
     message = "local variable %r (defined in enclosing scope on line %r) referenced before assignment"
-    def __init__(self, filename, lineno, col, name, orig_lineno):
+    def __init__(self, filename, lineno, col, name, orig_lineno, orig_col):
         Message.__init__(self, filename, lineno)
         self.message_args = (name, orig_lineno)
 
@@ -72,6 +72,6 @@ class RedefinedFunction(Message):
 
 class LateFutureImport(Message):
     message = 'future import(s) %r after other statements'
-    def __init__(self, filename, lineno, names):
+    def __init__(self, filename, lineno, col, names):
         Message.__init__(self, filename, lineno)
         self.message_args = (names,)

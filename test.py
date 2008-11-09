@@ -45,6 +45,35 @@ for a in xrange(50):
 'from fu import *',
 'del a',
 'import fu; fu.bar = 1',
+'f(123).f()',
+'''
+def f(foo):
+    class C:
+        bar = foo
+        def f(self):
+            return foo
+    return C()
+
+f(123).f()''',
+'''
+import fu; [fu for _ in range(1)]
+''',
+'''
+import fu
+def bar():
+    def baz():
+        def fu():
+            pass
+''',
+'''
+import fu
+try: pass
+except Exception, fu: pass
+''',
+'''
+try: pass
+except Foo, (a, b, c): pass
+''',
 ]
 
 print 
