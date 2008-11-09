@@ -262,7 +262,7 @@ class Checker(ast.NodeVisitor):
 
     def visit_With(self, node):
         self.visit(node.context_expr)
-    
+
         # handle new bindings made by optional "as" part
         if node.optional_vars is not None:
             self.assign_vars(node.optional_vars)
@@ -275,7 +275,7 @@ class Checker(ast.NodeVisitor):
                 self.report(messages.LateFutureImport, node.lineno, node.col_offset, [alias.name for alias in node.names])
         else:
             self.futures_allowed = False
-        
+
         for alias in node.names:
             if alias.name == '*':
                 self.scope.import_starred = True
@@ -298,7 +298,7 @@ class Checker(ast.NodeVisitor):
     def visit_ClassDef(self, node):
         self.add_binding(node, Assignment(node.name, node))
         self.visit_nodes(node.bases)
-        
+
         self.push_class_scope()
         self.visit_nodes(node.body)
         self.pop_scope()
@@ -309,7 +309,7 @@ class Checker(ast.NodeVisitor):
         if node.name is not None:
             self.assign_vars(node.name)
         self.visit_nodes(node.body)
-        
+
 
     def flatten(self, nodes):
         if isinstance(nodes, ast.Attribute):
@@ -326,7 +326,7 @@ class Checker(ast.NodeVisitor):
                 flattened_nodes += self.flatten(node.elts)
             elif node is not None:
                 flattened_nodes += self.flatten(node)
-        
+
         return flattened_nodes
 
     def add_binding(self, node, value, report_redef=True):
