@@ -134,6 +134,13 @@ def fix_missing_locations(node):
     _fix(node, 1, 0)
     return node
 
+def add_col_end(node):
+    def _fix(node, next):
+        children = list(iter_child_nodes(node))
+        for i, child in enumerate(children):
+            next_offset = children[i+1].col_offset if i < len(children) else next.col_offset
+            child.col_end = next_offset
+
 
 def increment_lineno(node, n=1):
     """

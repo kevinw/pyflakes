@@ -315,6 +315,10 @@ class Checker(ast.NodeVisitor):
         if isinstance(nodes, ast.Attribute):
             self.visit(nodes)
             return []
+        elif isinstance(nodes, ast.Subscript):
+            self.visit(nodes.value)
+            self.visit(nodes.slice)
+            return []
         elif isinstance(nodes, ast.Name):
             return [nodes]
         elif isinstance(nodes, (ast.Tuple, ast.List)):
