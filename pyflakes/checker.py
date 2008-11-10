@@ -253,8 +253,7 @@ class Checker(ast.NodeVisitor):
             self.assign_vars(node.targets)
 
     def visit_Delete(self, node):
-        for target in node.targets:
-            assert isinstance(target, ast.Name)
+        for target in self.flatten(node.targets):
             if isinstance(self.scope, FunctionScope) and target.id in self.scope.globals:
                 del self.scope.globals[target.id]
             else:
