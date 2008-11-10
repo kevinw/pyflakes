@@ -3,6 +3,7 @@ from pyflakes import messages
 import __builtin__
 
 
+allowed_before_future = frozenset((ast.Module, ast.ImportFrom, ast.Expr, ast.Str))
 defined_names = set(('__file__',))
 
 def is_builtin(name):
@@ -355,7 +356,7 @@ class Checker(ast.NodeVisitor):
             scope[name] = value
 
     def visit(self, node):
-        if not isinstance(node, (ast.Module, ast.ImportFrom)):
+        if not isinstance(node, allowed_before_future):
             self.futures_allowed = False
 
         return super(Checker, self).visit(node)
