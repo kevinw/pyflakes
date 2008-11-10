@@ -139,9 +139,7 @@ class Checker(ast.NodeVisitor):
         for generator in node.generators:
             self.visit(generator.iter)
 
-            target = generator.target
-            assert isinstance(target, ast.Name)
-            self.add_binding(target, Assignment(target.id, generator.target))
+            self.assign_vars(generator.target)
 
             if hasattr(node, 'elt'):
                 self.visit(node.elt)
