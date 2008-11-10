@@ -3,7 +3,7 @@ from pyflakes import messages
 import __builtin__
 
 
-allowed_before_future = frozenset((ast.Module, ast.ImportFrom, ast.Expr, ast.Str))
+allowed_before_future = (ast.Module, ast.ImportFrom, ast.Expr, ast.Str)
 defined_names = set(('__file__',))
 
 def is_builtin(name):
