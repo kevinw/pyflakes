@@ -6,14 +6,6 @@ import __builtin__
 allowed_before_future = (ast.Module, ast.ImportFrom, ast.Expr, ast.Str)
 defined_names = set(('__file__',))
 
-def is_builtin(name):
-    if hasattr(__builtin__, name):
-        return True
-    if name in defined_names:
-        return True
-
-    return False
-
 class Binding(object):
     """
     @ivar used: pair of (L{Scope}, line-number) indicating the scope and
@@ -78,7 +70,7 @@ class ModuleScope(Scope):
     pass
 
 class Checker(ast.NodeVisitor):
-    def __init__(self, tree, filename='(none)'):
+    def __init__(self, tree, filename='(none)', builtins = None):
         ast.NodeVisitor.__init__(self)
 
         self.deferred = []
@@ -87,6 +79,7 @@ class Checker(ast.NodeVisitor):
         self.filename = filename
         self.scope_stack = [ModuleScope()]
         self.futures_allowed = True
+        self.builtins = frozenset(builtins or [])
 
         self.visit(tree)
         for handler, scope in self.deferred:
@@ -153,6 +146,8 @@ class Checker(ast.NodeVisitor):
         '''
         Process bindings for loop variables.
         '''
+        self.visit_nodes(node.iter)
+
         for var in self.flatten(node.target):
             upval = self.scope.get(var.id)
             if isinstance(upval, Importation) and upval.used:
@@ -219,7 +214,7 @@ class Checker(ast.NodeVisitor):
         try:
             self.scope_stack[0][node.id].used = (scope, node.lineno, node.col_offset)
         except KeyError:
-            if not import_starred and not is_builtin(name):
+            if not import_starred and not self.is_builtin(name):
                 self.report(messages.UndefinedName, node.lineno, node.col_offset, name)
 
     def assign_vars(self, targets, report_redef=True):
@@ -302,7 +297,7 @@ class Checker(ast.NodeVisitor):
         self.pop_scope()
 
     def visit_excepthandler(self, node):
-        if node.name is not None:
+        if node.type is not None:
             self.visit(node.type)
         if node.name is not None:
             self.assign_vars(node.name)
@@ -369,4 +364,14 @@ class Checker(ast.NodeVisitor):
 
         for node in nodes:
             self.visit(node)
+
+    def is_builtin(self, name):
+        if hasattr(__builtin__, name):
+            return True
+        if name in defined_names:
+            return True
+        if name in self.builtins:
+            return True
+
+        return False
 
