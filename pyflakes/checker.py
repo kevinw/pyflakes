@@ -177,6 +177,10 @@ class Checker(ast.NodeVisitor):
                 argnames.add(arg.id)
 
             self.assign_vars(node.args.args, report_redef=False)
+            if node.args.vararg is not None:
+                self.add_binding(node, Assignment(node.args.vararg, node), False)
+            if node.args.kwarg is not None:
+                self.add_binding(node, Assignment(node.args.kwarg, node), False)
             self.visit_nodes(node.body)
             self.pop_scope()
 
