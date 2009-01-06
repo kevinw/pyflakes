@@ -4,7 +4,7 @@ import __builtin__
 
 
 allowed_before_future = (ast.Module, ast.ImportFrom, ast.Expr, ast.Str)
-defined_names = set(('__file__',))
+defined_names = set(('__file__', '__builtins__'))
 
 class Binding(object):
     """
