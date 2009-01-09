@@ -132,9 +132,9 @@ class Checker(ast.NodeVisitor):
     def visit_GeneratorExp(self, node):
         for generator in node.generators:
             self.visit(generator.iter)
-
             self.assign_vars(generator.target)
 
+        for generator in node.generators:
             if hasattr(node, 'elt'):
                 self.visit(node.elt)
 

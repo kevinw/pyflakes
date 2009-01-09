@@ -225,3 +225,10 @@ class Python25Test(harness.Test):
         with bar as bar:
             pass
         ''', m.UndefinedName)
+
+    def test_listNestedListComprehension(self):
+        self.flakes('''
+        root = [['213', '123'], ['4354']]
+        foo = [int(c) for group in root for c in group]
+        ''')
+
