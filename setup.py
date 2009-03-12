@@ -12,7 +12,7 @@ setup(
     maintainer="Moe Aboulkheir",
     maintainer_email="moe@divmod.com",
     url="http://www.divmod.org/projects/pyflakes",
-    packages=["pyflakes"],
+    packages=["pyflakes", "pyflakes.scripts"],
     scripts=["bin/pyflakes"],
     long_description="""Pyflakes is program to analyze Python programs and detect various errors. It
 works by parsing the source file, not importing it, so it is safe to use on
