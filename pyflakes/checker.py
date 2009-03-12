@@ -159,7 +159,14 @@ class Checker(ast.NodeVisitor):
         self.visit_nodes(node.body + node.orelse)
 
     def visit_FunctionDef(self, node):
-        self.visit_nodes(node.decorators)
+
+        try:
+            decorators = node.decorator_list
+        except AttributeError:
+            # Use .decorators for Python 2.5 compatibility
+            decorators = node.decorators
+
+        self.visit_nodes(decorators)
         self.add_binding(node, FunctionDefinition(node.name, node))
         self.visit_Lambda(node)
 
@@ -307,6 +314,7 @@ class Checker(ast.NodeVisitor):
             self.assign_vars(node.name)
         self.visit_nodes(node.body)
 
+    visit_ExceptHandler = visit_excepthandler # in 2.6, this was CamelCased
 
     def flatten(self, nodes):
         if isinstance(nodes, ast.Attribute):
