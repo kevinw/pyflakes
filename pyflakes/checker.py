@@ -304,7 +304,7 @@ class Checker(ast.NodeVisitor):
             decorators = node.decorator_list
         except AttributeError:
             # Use .decorators for Python 2.5 compatibility
-            decorators = node.decorators
+            decorators = getattr(node, 'decorators', [])
 
         self.visit_nodes(decorators)
 
