@@ -37,7 +37,7 @@ class Assignment(Binding):
     pass
 
 class FunctionDefinition(Binding):
-    pass
+    _property_decorator = False
 
 
 class Scope(dict):
@@ -167,7 +167,16 @@ class Checker(ast.NodeVisitor):
             decorators = node.decorators
 
         self.visit_nodes(decorators)
-        self.add_binding(node, FunctionDefinition(node.name, node))
+
+        # Check for property decorator
+        func_def = FunctionDefinition(node.name, node)
+
+        for decorator in decorators:
+            if getattr(decorator, 'attr', None) in ('setter', 'deleter'):
+                func_def._property_decorator = True
+
+        self.add_binding(node, func_def)
+
         self.visit_Lambda(node)
 
     def visit_Lambda(self, node):
@@ -352,7 +361,9 @@ class Checker(ast.NodeVisitor):
         # Check for a redefined function
         func = scope.get(name)
         if (isinstance(func, FunctionDefinition) and isinstance(value, FunctionDefinition)):
-            self.report(messages.RedefinedFunction, line, name, func.source.lineno)
+            # Property-decorated functions (@x.setter) should have duplicate names
+            if not value._property_decorator:
+                self.report(messages.RedefinedFunction, line, name, func.source.lineno)
 
         # Check for redefining an unused import
         if report_redef and not isinstance(scope, ClassScope):
