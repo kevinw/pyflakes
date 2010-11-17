@@ -1,7 +1,9 @@
 
-from sys import version_info
+from _ast import PyCF_ONLY_AST
 
-from pyflakes import messages as m
+from twisted.trial.unittest import TestCase
+
+from pyflakes import messages as m, checker
 from pyflakes.test import harness
 
 
@@ -24,8 +26,39 @@ class Test(harness.Test):
     def test_builtins(self):
         self.flakes('range(10)')
 
-    def test_magic_globals(self):
+
+    def test_magicGlobalsFile(self):
+        """
+        Use of the C{__file__} magic global should not emit an undefined name
+        warning.
+        """
         self.flakes('__file__')
+
+
+    def test_magicGlobalsBuiltins(self):
+        """
+        Use of the C{__builtins__} magic global should not emit an undefined
+        name warning.
+        """
+        self.flakes('__builtins__')
+
+
+    def test_magicGlobalsName(self):
+        """
+        Use of the C{__name__} magic global should not emit an undefined name
+        warning.
+        """
+        self.flakes('__name__')
+
+
+    def test_magicGlobalsPath(self):
+        """
+        Use of the C{__path__} magic global should not emit an undefined name
+        warning, if you refer to it from a file called __init__.py.
+        """
+        self.flakes('__path__', m.UndefinedName)
+        self.flakes('__path__', filename='package/__init__.py')
+
 
     def test_globalImportStar(self):
         '''Can't find undefined names with import *'''
@@ -53,6 +86,16 @@ class Test(harness.Test):
         def b(): fu
         ''')
     test_definedByGlobal.todo = ''
+
+    def test_globalInGlobalScope(self):
+        """
+        A global statement in the global scope is ignored.
+        """
+        self.flakes('''
+        global x
+        def foo():
+            print x
+        ''', m.UndefinedName)
 
     def test_del(self):
         '''del deletes bindings'''
@@ -91,6 +134,7 @@ class Test(harness.Test):
         def fun():
             a
             a = 2
+            return a
         ''', m.UndefinedLocal)
 
     def test_laterRedefinedGlobalFromNestedScope2(self):
@@ -106,6 +150,26 @@ class Test(harness.Test):
                 def fun2():
                     a
                     a = 2
+                    return a
+        ''', m.UndefinedLocal)
+
+
+    def test_intermediateClassScopeIgnored(self):
+        """
+        If a name defined in an enclosing scope is shadowed by a local variable
+        and the name is used locally before it is bound, an unbound local
+        warning is emitted, even if there is a class scope between the enclosing
+        scope and the local scope.
+        """
+        self.flakes('''
+        def f():
+            x = 1
+            class g:
+                def h(self):
+                    a = x
+                    x = None
+                    print x, a
+            print x
         ''', m.UndefinedLocal)
 
 
@@ -124,6 +188,9 @@ class Test(harness.Test):
                     def c():
                         x
                         x = 3
+                        return x
+                    return x
+                return x
         ''', m.UndefinedLocal).messages[0]
         self.assertEqual(exc.message_args, ('x', 5))
 
@@ -139,6 +206,8 @@ class Test(harness.Test):
                 def fun2():
                     a
                     a = 1
+                    return a
+                return a
         ''', m.UndefinedLocal)
 
     def test_nestedClass(self):
@@ -161,18 +230,16 @@ class Test(harness.Test):
             class C:
                 bar = foo
             foo = 456
-
+            return foo
         f()
         ''', m.UndefinedName)
 
-
-
-class Python24Test(harness.Test):
-    """
-    Tests for checking of syntax which is valid in Python 2.4 and newer.
-    """
-    if version_info < (2, 4):
-        skip = "Python 2.4 required for generator expression tests."
+    def test_definedAsStarArgs(self):
+        '''star and double-star arg names are defined'''
+        self.flakes('''
+        def f(a, *b, **c):
+            print a, b, c
+        ''')
 
     def test_definedInGenExp(self):
         """
@@ -180,3 +247,19 @@ class Python24Test(harness.Test):
         warnings.
         """
         self.flakes('(a for a in xrange(10) if a)')
+
+
+
+class NameTests(TestCase):
+    """
+    Tests for some extra cases of name handling.
+    """
+    def test_impossibleContext(self):
+        """
+        A Name node with an unrecognized context results in a RuntimeError being
+        raised.
+        """
+        tree = compile("x = 10", "<test>", "exec", PyCF_ONLY_AST)
+        # Make it into something unrecognizable.
+        tree.body[0].targets[0].ctx = object()
+        self.assertRaises(RuntimeError, checker.Checker, tree)
