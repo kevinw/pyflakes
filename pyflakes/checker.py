@@ -98,7 +98,7 @@ class Assignment(Binding):
 
 
 class FunctionDefinition(Binding):
-    pass
+    _property_decorator = False
 
 
 
@@ -353,8 +353,9 @@ class Checker(object):
         '''
         if (isinstance(self.scope.get(value.name), FunctionDefinition)
                     and isinstance(value, FunctionDefinition)):
-            self.report(messages.RedefinedFunction,
-                        loc, value.name, self.scope[value.name].source)
+            if not value._property_decorator:
+                self.report(messages.RedefinedFunction,
+                            loc, value.name, self.scope[value.name].source)
 
         if not isinstance(self.scope, ClassScope):
             for scope in self.scopeStack[::-1]:
@@ -517,7 +518,14 @@ class Checker(object):
         else:
             for deco in node.decorator_list:
                 self.handleNode(deco, node)
-        self.addBinding(node, FunctionDefinition(node.name, node))
+
+        # Check for property decorator
+        func_def = FunctionDefinition(node.name, node)
+        for decorator in node.decorator_list:
+            if getattr(decorator, 'attr', None) in ('setter', 'deleter'):
+                func_def._property_decorator = True
+
+        self.addBinding(node, func_def)
         self.LAMBDA(node)
 
     def LAMBDA(self, node):
