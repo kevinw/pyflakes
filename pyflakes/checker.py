@@ -184,7 +184,9 @@ class Checker(object):
     nodeDepth = 0
     traceTree = False
 
-    def __init__(self, tree, filename='(none)'):
+    def __init__(self, tree, filename=None):
+        if filename is None:
+            filename = '(none)'
         self._deferredFunctions = []
         self._deferredAssignments = []
         self.dead_scopes = []
