@@ -528,9 +528,15 @@ class Checker(object):
 
         # Check for property decorator
         func_def = FunctionDefinition(node.name, node)
-        for decorator in node.decorator_list:
-            if getattr(decorator, 'attr', None) in ('setter', 'deleter'):
-                func_def._property_decorator = True
+        
+        if hasattr(node, 'decorators'):
+            for decorator in node.decorators:
+                if getattr(decorator, 'attr', None) in ('setter', 'deleter'):
+                    func_def._property_decorator = True
+        else:
+            for decorator in node.decorator_list:
+                if getattr(decorator, 'attr', None) in ('setter', 'deleter'):
+                    func_def._property_decorator = True
 
         self.addBinding(node, func_def)
         self.LAMBDA(node)
