@@ -46,6 +46,62 @@ class Test(harness.Test):
             def a(): pass
         ''', m.RedefinedFunction)
 
+    def test_redefinedIfElseFunction(self):
+        """
+        Test that shadowing a function definition twice in an if
+        and else block does not raise a warning.
+
+        Issue #13: https://github.com/kevinw/pyflakes/issues/13
+        """
+        self.flakes('''
+        if True:
+            def a(): pass
+        else:
+            def a(): pass
+        ''')
+
+    def test_redefinedIfFunction(self):
+        """
+        Test that shadowing a function definition within an if block
+        raises a warning.
+
+        Issue #13: https://github.com/kevinw/pyflakes/issues/13
+        """
+        self.flakes('''
+        if True:
+            def a(): pass
+            def a(): pass
+        ''', m.RedefinedFunction)
+
+    def test_redefinedTryExceptFunction(self):
+        """
+        Test that shadowing a function definition twice in try
+        and except block does not raise a warning.
+
+        Issue #13: https://github.com/kevinw/pyflakes/issues/13
+        """
+        self.flakes('''
+        try:
+            def a(): pass
+        except:
+            def a(): pass
+        ''')
+
+    def test_redefinedTryFunction(self):
+        """
+        Test that shadowing a function definition within a try block
+        raises a warning.
+
+        Issue #13: https://github.com/kevinw/pyflakes/issues/13
+        """
+        self.flakes('''
+        try:
+            def a(): pass
+            def a(): pass
+        except:
+            pass
+        ''', m.RedefinedFunction)
+
     def test_functionDecorator(self):
         """
         Test that shadowing a function definition with a decorated version of
